@@ -1,0 +1,34 @@
+# HAR files - exclude all HAR files from version control
+*.har
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Generated HTML reports
+*.html
+
+# SQLite database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Virtual environment
+venv/
+env/
+.env
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
