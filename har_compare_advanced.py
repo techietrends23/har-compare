@@ -1,4 +1,12 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+def render_header_table(headers: dict) -> str:
+    if not headers:
+        return '<div class="td" style="color:var(--muted)">None</div>'
+    rows = [f'<tr><th>Header</th><th>Value</th></tr>']
+    for k, v in headers.items():
+        rows.append(f'<tr><td>{html.escape(str(k))}</td><td style="word-break:break-word">{html.escape(str(v))}</td></tr>')
+    return '<table class="header-table">' + ''.join(rows) + '</table>'
 """
 Advanced HAR Comparison Tool
 - Robust request pairing (endpoint + method + parameters). GraphQL pairs by operationName + normalized query
@@ -8,7 +16,6 @@ Advanced HAR Comparison Tool
 
 Standard library only.
 """
-from __future__ import annotations
 import argparse
 import json
 import html
@@ -382,9 +389,11 @@ input[type='search']{padding:8px 10px;border:1px solid var(--border);border-radi
 .badge.good{background:#ecfdf5;color:#065f46;border-color:#a7f3d0}
 .badge.warn{background:#fff7ed;color:#9a3412;border-color:#fed7aa}
 .badge.bad{background:#fef2f2;color:#7f1d1d;border-color:#fecaca}
-.code{background:#f3f4f6;border:1px solid var(--border);border-radius:8px;padding:8px;overflow:auto;max-height:280px;white-space:pre-wrap}
-.kv{margin:6px 0 0 0;padding-left:18px}
-.kv li{margin:2px 0}
+.code{background:#f3f4f6;border:1px solid var(--border);border-radius:8px;padding:8px;max-height:280px;white-space:pre-wrap;overflow-x:auto;word-break:break-word;overflow-y:auto}
+.header-table{width:100%;border-collapse:collapse;margin:6px 0 0 0;table-layout:fixed}
+.header-table th,.header-table td{padding:4px 8px;font-size:13px;text-align:left;vertical-align:top;word-break:break-word;max-width:320px}
+.header-table th{background:#f3f4f6;color:var(--muted);font-weight:600;border-bottom:1px solid var(--border)}
+.header-table td{background:#fff}
 .section-title{color:#1d4ed8;margin:6px 0 4px 0;font-weight:600}
 .expand{cursor:pointer}
 .details{display:none;padding:8px 12px 12px 12px;border-top:1px solid var(--border);background:#fafafa}
@@ -398,10 +407,43 @@ JS = """
 function showTab(name){document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));document.querySelectorAll('.panel').forEach(p=>p.style.display='none');document.getElementById('panel-'+name).style.display='block';document.getElementById('tab-'+name).classList.add('active');filterRows()}
 function toggleDetails(id){const el=document.getElementById(id);el.style.display=(el.style.display==='table-row'?'none':'table-row')}
 function getCheckedDomains(){return Array.from(document.querySelectorAll('.domain-checkbox')).filter(c=>c.checked).map(c=>c.value)}
-function savePrefs(){const prefs={domains:getCheckedDomains(),search:document.getElementById('searchBox').value};localStorage.setItem('harComparePrefs',JSON.stringify(prefs))}
-function loadPrefs(){try{const p=JSON.parse(localStorage.getItem('harComparePrefs')||'{}');if(p.search!==undefined){document.getElementById('searchBox').value=p.search}if(p.domains&&p.domains.length){document.querySelectorAll('.domain-checkbox').forEach(c=>{c.checked=p.domains.includes(c.value)})}}catch(e){} }
+function savePrefs(){const prefs={domains:getCheckedDomains(),search:document.getElementById('searchBox').value,headerKey:document.getElementById('headerKeyBox').value,headerVal:document.getElementById('headerValBox').value};localStorage.setItem('harComparePrefs',JSON.stringify(prefs))}
+function loadPrefs(){try{const p=JSON.parse(localStorage.getItem('harComparePrefs')||'{}');if(p.search!==undefined){document.getElementById('searchBox').value=p.search}if(p.domains&&p.domains.length){document.querySelectorAll('.domain-checkbox').forEach(c=>{c.checked=p.domains.includes(c.value)})}if(p.headerKey!==undefined){document.getElementById('headerKeyBox').value=p.headerKey}if(p.headerVal!==undefined){document.getElementById('headerValBox').value=p.headerVal}}catch(e){} }
 function onFilterChanged(){savePrefs();filterRows()}
-function filterRows(){const s=(document.getElementById('searchBox').value||'').toLowerCase();const ds=new Set(getCheckedDomains());document.querySelectorAll('[data-row="req"]').forEach(r=>{const domain=r.getAttribute('data-domain');const name=(r.getAttribute('data-name')||'').toLowerCase();const domOk=ds.size===0||ds.has(domain);const sOk=s===''||name.includes(s);r.style.display=(domOk&&sOk)?'table-row':'none';const det=document.getElementById(r.getAttribute('data-detail-id'));if(det){det.style.display='none'}})}
+function filterRows(){
+    const s=(document.getElementById('searchBox').value||'').toLowerCase();
+    const ds=new Set(getCheckedDomains());
+    const headerKey=(document.getElementById('headerKeyBox').value||'').toLowerCase();
+    const headerVal=(document.getElementById('headerValBox').value||'').toLowerCase();
+    const matchType=(document.getElementById('headerMatchType')||{value:'contains'}).value;
+    document.querySelectorAll('[data-row="req"]').forEach(r=>{
+        const domain=r.getAttribute('data-domain');
+        const name=(r.getAttribute('data-name')||'').toLowerCase();
+        let domOk=ds.size===0||ds.has(domain);
+        let sOk=s===''||name.includes(s);
+        let headerOk=true;
+        if(headerKey||headerVal){
+            let found=false;
+            // Try to find header in data-req-headers and data-res-headers
+            let reqHeaders=JSON.parse(r.getAttribute('data-req-headers')||'{}');
+            let resHeaders=JSON.parse(r.getAttribute('data-res-headers')||'{}');
+            [reqHeaders,resHeaders].forEach(hs=>{
+                Object.keys(hs).forEach(k=>{
+                    let keyMatch = !headerKey || k.toLowerCase().includes(headerKey);
+                    let valMatch = false;
+                    if(!headerVal) valMatch = true;
+                    else if(matchType==='exact') valMatch = ((''+hs[k]).toLowerCase() === headerVal);
+                    else valMatch = ((''+hs[k]).toLowerCase().includes(headerVal));
+                    if(keyMatch && valMatch){found=true;}
+                })
+            })
+            headerOk=found;
+        }
+        r.style.display=(domOk&&sOk&&headerOk)?'table-row':'none';
+        const det=document.getElementById(r.getAttribute('data-detail-id'));
+        if(det){det.style.display='none'}
+    })
+}
 function selectAllDomains(checked){document.querySelectorAll('.domain-checkbox').forEach(c=>c.checked=checked);onFilterChanged()}
 window.addEventListener('DOMContentLoaded',()=>{loadPrefs();filterRows()});
 """
@@ -421,7 +463,12 @@ HTML_HEAD = """
     <div class=\"filters\">
       <div class=\"checkbox-list\">__DOMAIN_CHECKBOXES__ <button onclick=\"selectAllDomains(true)\" type=\"button\">All</button> <button onclick=\"selectAllDomains(false)\" type=\"button\">None</button></div>
       <input id=\"searchBox\" type=\"search\" placeholder=\"Search request name...\" oninput=\"onFilterChanged()\"/>
-    </div>
+            <input id=\"headerKeyBox\" type=\"search\" placeholder=\"Header key...\" style=\"min-width:120px\" oninput=\"onFilterChanged()\"/>
+            <input id=\"headerValBox\" type=\"search\" placeholder=\"Header value...\" style=\"min-width:120px\" oninput=\"onFilterChanged()\"/>
+            <select id="headerMatchType" style="min-width:100px" onchange="onFilterChanged()">
+                <option value="contains">contains</option>
+                <option value="exact">exact match</option>
+            </select>
   </div>
 """
 
@@ -435,14 +482,18 @@ HTML_FOOT = """
 def render_header_diff(title: str, diff: Dict[str, Any]) -> str:
     parts = [f'<div class="section-title">{html.escape(title)}</div>']
     if diff["added"] or diff["removed"] or diff["changed"]:
-        parts.append('<ul class="kv">')
-        for k,v in diff["added"].items():
-            parts.append(f'<li><span class="badge good">+ {html.escape(k)}</span> {html.escape(v)}</li>')
-        for k,v in diff["removed"].items():
-            parts.append(f'<li><span class="badge bad">- {html.escape(k)}</span> {html.escape(v)}</li>')
-        for k,ch in diff["changed"].items():
-            parts.append(f'<li>• {html.escape(k)}: <span class="diff"><span class="old">{html.escape(str(ch["old"]))}</span> → <span class="new">{html.escape(str(ch["new"]))}</span></span></li>')
-        parts.append('</ul>')
+        parts.append('<table class="header-table">')
+        parts.append('<tr><th>Header</th><th>Old Value</th><th>New Value</th></tr>')
+        # Changed
+        for k, ch in diff["changed"].items():
+            parts.append(f'<tr><td>{html.escape(k)}</td><td style="background:#fee2e2">{html.escape(str(ch["old"]))}</td><td style="background:#dcfce7">{html.escape(str(ch["new"]))}</td></tr>')
+        # Added
+        for k, v in diff["added"].items():
+            parts.append(f'<tr><td>{html.escape(k)}</td><td></td><td style="background:#ecfdf5">{html.escape(v)}</td></tr>')
+        # Removed
+        for k, v in diff["removed"].items():
+            parts.append(f'<tr><td>{html.escape(k)}</td><td style="background:#fef2f2">{html.escape(v)}</td><td></td></tr>')
+        parts.append('</table>')
     else:
         parts.append('<div class="td" style="color:var(--muted)">No changes</div>')
     return "".join(parts)
@@ -505,19 +556,26 @@ def generate_html(added: List[Dict], removed: List[Dict], changed_rows: List[Dic
     html_added.append('<table class="table">')
     for i,x in enumerate(added):
         rid = f"add-{i}"
-        display_name = (f"[{escape(x.get('gql_operation'))}] {escape(x['method'])} {escape(x['endpoint'])}" if x.get('type')=='graphql' and x.get('gql_operation') else f"{escape(x['method'])} {escape(x['endpoint'])}")
-        html_added.append('<tr class="tr expand" data-row="req" onclick="toggleDetails(\'%s\')" data-detail-id="%s" data-domain="%s" data-name="%s">'%(rid, rid, escape(x['domain']), display_name))
+        if x.get('type') == 'graphql' and x.get('gql_operation'):
+            display_name = f"[{escape(x.get('gql_operation'))}] {escape(x['method'])} {escape(x['endpoint'])}"
+        else:
+            display_name = f"{escape(x['method'])} {escape(x['endpoint'])}"
+        html_added.append('<tr class="tr expand" data-row="req" onclick="toggleDetails(\'%s\')" data-detail-id="%s" data-domain="%s" data-name="%s" data-req-headers="%s" data-res-headers="%s">'%(
+            rid, rid, escape(x['domain']), display_name,
+            html.escape(json.dumps(x.get('req_headers') or {})),
+            html.escape(json.dumps(x.get('res_headers') or {}))
+        ))
         html_added.append('<td class="td">%s</td>'%escape(x['method']))
-        html_added.append('<td class="td"><span class="url">%s</span></td>'%escape(x['url']))
+        html_added.append('<td class="td"><span class="url">%s</span><div style="color:var(--muted);font-size:12px">%s</div></td>'%(escape(x['url']), display_name))
         html_added.append('<td class="td"><span class="badge good">added</span></td>')
         html_added.append('</tr>')
         # details row
         html_added.append('<tr id="%s" class="details"><td class="td" colspan="3">'%rid)
         # show headers and GraphQL content if present
         html_added.append('<div class="section-title">Request Headers</div>')
-        html_added.append('<ul class="kv">' + ''.join([f'<li>{escape(k)}: {escape(v)}</li>' for k,v in (x.get('req_headers') or {}).items()]) + '</ul>')
+        html_added.append(render_header_table(x.get('req_headers') or {}))
         html_added.append('<div class="section-title">Response Headers</div>')
-        html_added.append('<ul class="kv">' + ''.join([f'<li>{escape(k)}: {escape(v)}</li>' for k,v in (x.get('res_headers') or {}).items()]) + '</ul>')
+        html_added.append(render_header_table(x.get('res_headers') or {}))
         if x.get('type')=='graphql':
             html_added.append(render_graphql_details({
                 'op_a': None,'op_b': x.get('gql_operation'),
@@ -534,17 +592,24 @@ def generate_html(added: List[Dict], removed: List[Dict], changed_rows: List[Dic
     html_added.append('<table class="table">')
     for i,x in enumerate(removed):
         rid = f"rem-{i}"
-        display_name = (f"[{escape(x.get('gql_operation'))}] {escape(x['method'])} {escape(x['endpoint'])}" if x.get('type')=='graphql' and x.get('gql_operation') else f"{escape(x['method'])} {escape(x['endpoint'])}")
-        html_added.append('<tr class="tr expand" data-row="req" onclick="toggleDetails(\'%s\')" data-detail-id="%s" data-domain="%s" data-name="%s">'%(rid, rid, escape(x['domain']), display_name))
+        if x.get('type') == 'graphql' and x.get('gql_operation'):
+            display_name = f"[{escape(x.get('gql_operation'))}] {escape(x['method'])} {escape(x['endpoint'])}"
+        else:
+            display_name = f"{escape(x['method'])} {escape(x['endpoint'])}"
+        html_added.append('<tr class="tr expand" data-row="req" onclick="toggleDetails(\'%s\')" data-detail-id="%s" data-domain="%s" data-name="%s" data-req-headers="%s" data-res-headers="%s">'%(
+            rid, rid, escape(x['domain']), display_name,
+            html.escape(json.dumps(x.get('req_headers') or {})),
+            html.escape(json.dumps(x.get('res_headers') or {}))
+        ))
         html_added.append('<td class="td">%s</td>'%escape(x['method']))
-        html_added.append('<td class="td"><span class="url">%s</span></td>'%escape(x['url']))
+        html_added.append('<td class="td"><span class="url">%s</span><div style="color:var(--muted);font-size:12px">%s</div></td>'%(escape(x['url']), display_name))
         html_added.append('<td class="td"><span class="badge bad">removed</span></td>')
         html_added.append('</tr>')
         html_added.append('<tr id="%s" class="details"><td class="td" colspan="3">'%rid)
         html_added.append('<div class="section-title">Request Headers</div>')
-        html_added.append('<ul class="kv">' + ''.join([f'<li>{escape(k)}: {escape(v)}</li>' for k,v in (x.get('req_headers') or {}).items()]) + '</ul>')
+        html_added.append(render_header_table(x.get('req_headers') or {}))
         html_added.append('<div class="section-title">Response Headers</div>')
-        html_added.append('<ul class="kv">' + ''.join([f'<li>{escape(k)}: {escape(v)}</li>' for k,v in (x.get('res_headers') or {}).items()]) + '</ul>')
+        html_added.append(render_header_table(x.get('res_headers') or {}))
         if x.get('type')=='graphql':
             html_added.append(render_graphql_details({
                 'op_a': x.get('gql_operation'),'op_b': None,
@@ -564,9 +629,12 @@ def generate_html(added: List[Dict], removed: List[Dict], changed_rows: List[Dic
         status_val = f"<span class='diff'><span class='old'>{escape(row['status_a'])}</span> → <span class='new'>{escape(row['status_b'])}</span></span>" if row['badges']['status'] else escape(row.get('status_b'))
         time_val = f"<span class='diff'><span class='old'>{escape(row['time_a'])}ms</span> → <span class='new'>{escape(row['time_b'])}ms</span></span>" if row['badges']['time'] else f"{escape(row.get('time_b'))}ms"
         name = escape(row.get('name') or '')
-        html_changed.append('<tr class="tr expand" onclick="toggleDetails(\'%s\')" data-row="req" data-detail-id="%s" data-domain="%s" data-name="%s">'%(rid, rid, escape(row['domain']), name))
+        html_changed.append('<tr class="tr expand" onclick="toggleDetails(\'%s\')" data-row="req" data-detail-id="%s" data-domain="%s" data-name="%s" data-req-headers="%s" data-res-headers="%s">'%(
+            rid, rid, escape(row['domain']), name,
+            html.escape(json.dumps(row.get('req_hdr',{}).get('old',{}) or {})),
+            html.escape(json.dumps(row.get('res_hdr',{}).get('old',{}) or {}))
+        ))
         html_changed.append('<td class="td">%s</td>'%escape(row['method']))
-        # show name with brackets for GraphQL
         html_changed.append('<td class="td"><span class="url">%s</span><div style="color:var(--muted);font-size:12px">%s</div></td>'%(escape(row['url']), name))
         html_changed.append('<td class="td">%s</td>'%status_val)
         html_changed.append('<td class="td">%s</td>'%time_val)
