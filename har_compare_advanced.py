@@ -17,6 +17,7 @@ Advanced HAR Comparison Tool
 Standard library only.
 """
 import argparse
+import difflib
 import json
 import html
 import os
@@ -513,26 +514,72 @@ def render_graphql_details(gql: Dict[str, Any]) -> str:
     if gql.get("query_a") or gql.get("query_b"):
         q_changed = gql.get("query_changed")
         change_badge = '<span class="badge warn">changed</span>' if q_changed else ''
-        qa = html.escape(str(gql.get("query_a") or ""))
-        qb = html.escape(str(gql.get("query_b") or ""))
+        qa = str(gql.get("query_a") or "")
+        qb = str(gql.get("query_b") or "")
         parts.append(f'<div class="section-title">Query {change_badge}</div>')
-        parts.append(f'<div class="code">{qa}</div>')
-        parts.append('<div class="td" style="color:var(--muted);margin:4px 0">→</div>')
-        parts.append(f'<div class="code">{qb}</div>')
+        parts.append('<div style="display:flex;gap:16px;flex-wrap:wrap">')
+        parts.append('<div style="flex:1;min-width:240px"><div style="color:var(--muted);font-size:12px">Before</div><div class="code">'+diff_text(qa, qb)+'</div></div>')
+        parts.append('<div style="flex:1;min-width:240px"><div style="color:var(--muted);font-size:12px">After</div><div class="code">'+diff_text(qb, qa)+'</div></div>')
+        parts.append('</div>')
     if gql.get("vars_a") is not None or gql.get("vars_b") is not None:
         v_changed = gql.get("vars_changed")
         vars_badge = '<span class="badge warn">changed</span>' if v_changed else ''
-        va = html.escape(json.dumps(gql.get("vars_a"), indent=2, ensure_ascii=False)) if gql.get("vars_a") is not None else ''
-        vb = html.escape(json.dumps(gql.get("vars_b"), indent=2, ensure_ascii=False)) if gql.get("vars_b") is not None else ''
+        va = json.dumps(gql.get("vars_a"), indent=2, ensure_ascii=False) if gql.get("vars_a") is not None else ''
+        vb = json.dumps(gql.get("vars_b"), indent=2, ensure_ascii=False) if gql.get("vars_b") is not None else ''
         parts.append(f'<div class="section-title">Variables {vars_badge}</div>')
-        parts.append(f'<pre class="code">{va}</pre>')
-        parts.append('<div class="td" style="color:var(--muted);margin:4px 0">→</div>')
-        parts.append(f'<pre class="code">{vb}</pre>')
+        parts.append('<div style="display:flex;gap:16px;flex-wrap:wrap">')
+        parts.append('<div style="flex:1;min-width:240px"><div style="color:var(--muted);font-size:12px">Before</div><pre class="code">'+diff_text(va, vb)+'</pre></div>')
+        parts.append('<div style="flex:1;min-width:240px"><div style="color:var(--muted);font-size:12px">After</div><pre class="code">'+diff_text(vb, va)+'</pre></div>')
+        parts.append('</div>')
     return "".join(parts)
 
 
 def escape(s: Any) -> str:
     return html.escape(str(s))
+
+def diff_text(a: str, b: str) -> str:
+    """Return HTML with word-level diff highlighting between a and b."""
+    if a is None: a = ""
+    if b is None: b = ""
+    a_lines = a.splitlines()
+    b_lines = b.splitlines()
+    # If multiline, do line diff; else, do word diff
+    if len(a_lines) > 1 or len(b_lines) > 1:
+        sm = difflib.SequenceMatcher(None, a_lines, b_lines)
+        out = []
+        for tag, i1, i2, j1, j2 in sm.get_opcodes():
+            if tag == 'equal':
+                for line in a_lines[i1:i2]:
+                    out.append(html.escape(line))
+            elif tag == 'replace':
+                for line in a_lines[i1:i2]:
+                    out.append('<span class="diff old">'+html.escape(line)+'</span>')
+                for line in b_lines[j1:j2]:
+                    out.append('<span class="diff new">'+html.escape(line)+'</span>')
+            elif tag == 'delete':
+                for line in a_lines[i1:i2]:
+                    out.append('<span class="diff old">'+html.escape(line)+'</span>')
+            elif tag == 'insert':
+                for line in b_lines[j1:j2]:
+                    out.append('<span class="diff new">'+html.escape(line)+'</span>')
+        return '\n'.join(out)
+    else:
+        # word-level diff
+        sm = difflib.SequenceMatcher(None, a, b)
+        out = []
+        for tag, i1, i2, j1, j2 in sm.get_opcodes():
+            if tag == 'equal':
+                out.append(html.escape(a[i1:i2]))
+            elif tag == 'replace':
+                if i1 != i2:
+                    out.append('<span class="diff old">'+html.escape(a[i1:i2])+'</span>')
+                if j1 != j2:
+                    out.append('<span class="diff new">'+html.escape(b[j1:j2])+'</span>')
+            elif tag == 'delete':
+                out.append('<span class="diff old">'+html.escape(a[i1:i2])+'</span>')
+            elif tag == 'insert':
+                out.append('<span class="diff new">'+html.escape(b[j1:j2])+'</span>')
+        return ''.join(out)
 
 
 def generate_html(added: List[Dict], removed: List[Dict], changed_rows: List[Dict], domains: List[str]) -> str:
